@@ -3,83 +3,81 @@ import pandas as pd
 from io import BytesIO
 from datetime import datetime, date
 
-# Function to process attendance data (from the first app)
 def process_attendance_files(file):
     df = pd.read_excel(file)
 
     # Check column names
     st.write(f"Columns in {file.name}: {df.columns}")
 
-    # Ensure that 'Date/Time' column exists
-    datetime_col = 'Date/Time'  # Replace with the actual column name
-    if datetime_col in df.columns:
-        df[datetime_col] = pd.to_datetime(df[datetime_col], errors='coerce')
-    else:
+    datetime_col = 'Date/Time'  # Replace with actual column name
+    if datetime_col not in df.columns:
         st.warning(f"'{datetime_col}' column not found in {file.name}")
-        return pd.DataFrame()  # Return empty DataFrame if column is not found
+        return pd.DataFrame()
 
-    # Extract the date
+    # Convert to datetime and drop rows with invalid dates
+    df[datetime_col] = pd.to_datetime(df[datetime_col], errors='coerce')
+    df = df.dropna(subset=[datetime_col])
     df['Date'] = df[datetime_col].dt.date
 
-    # Filter the data to include only the 1st to the 26th of the month
-
-    # Filter the DataFrame
-    # Current date
+    # --- Filter from 25th of last month to 26th of current month ---
     today = pd.to_datetime("today").date()
-
-    # Start date: 25th of last month
-    if today.month == 1:
-        start_date = date(today.year - 1, 12, 25)
-    else:
-        start_date = date(today.year, today.month - 1, 25)
-
-    # End date: 26th of current month
-    end_date = date(today.year, today.month, 26)
-
-    # Now filter
+    start_date = (today.replace(day=1) - pd.Timedelta(days=1)).replace(day=25)
+    end_date = today.replace(day=26)
     df_filtered = df[(df['Date'] >= start_date) & (df['Date'] <= end_date)]
 
-    # Extract Check-In and Check-Out times
-    df_filtered['Check_In_Time'] = df_filtered[datetime_col].dt.time  # Extract time for Check-In
-    df_filtered['Check_Out_Time'] = df_filtered[datetime_col].dt.time  # Extract time for Check-Out
+    if df_filtered.empty:
+        st.warning(f"No valid data between {start_date} and {end_date} in {file.name}")
+        return pd.DataFrame()
 
-    # Group by date and calculate Check-In and Check-Out times
+    # Extract Check-In and Check-Out times
+    df_filtered['Check_In_Time'] = df_filtered[datetime_col].dt.time
+    df_filtered['Check_Out_Time'] = df_filtered[datetime_col].dt.time
+
+    # Group by date and calculate earliest/latest times
     result = df_filtered.groupby('Date').agg(
-        Check_In_Time=('Check_In_Time', 'min'),  # Get the earliest time for Check-In
-        Check_Out_Time=('Check_Out_Time', 'max')  # Get the latest time for Check-Out
+        Check_In_Time=('Check_In_Time', 'min'),
+        Check_Out_Time=('Check_Out_Time', 'max')
     ).reset_index()
 
-    # Add 'Name', 'Department', and 'No.' columns from the filtered DataFrame
-    df_filtered_grouped = df_filtered[['Name', 'Department', 'No.', 'Date']].drop_duplicates()
-
-    # Merge the grouped data with the result to keep the columns
+    # Preserve employee metadata
+    meta_cols = [col for col in ['Name', 'Department', 'No.', 'Date'] if col in df_filtered.columns]
+    df_filtered_grouped = df_filtered[meta_cols].drop_duplicates()
     full_result = pd.merge(result, df_filtered_grouped, on='Date', how='left')
 
-    # Generate a date range from the 1st to the 26th of the month
-    month_start = result['Date'].min().replace(day=1)  # Get the first day of the month
-    date_range = pd.date_range(start=month_start, end=month_start.replace(day=26)).date
+    # --- Fill missing dates from 25th last month to 26th current month ---
+    full_range = pd.date_range(start=start_date, end=end_date).date
+    full_result = pd.DataFrame({'Date': full_range}).merge(full_result, on='Date', how='left')
 
-    # Ensure all dates from the range are present
-    full_result = pd.DataFrame({'Date': date_range})  # Create a DataFrame with all dates
-    full_result = full_result.merge(result, on='Date', how='left')  # Merge with existing data
-    full_result.loc[full_result['Check_In_Time'] == full_result['Check_Out_Time'], 'Check_Out_Time'] = pd.to_datetime("17:00").time()
+    # Convert Check_In/Out to datetime.time or placeholders
+    full_result['Check_In_Time'] = full_result['Check_In_Time'].where(full_result['Check_In_Time'].notna(), pd.NaT)
+    full_result['Check_Out_Time'] = full_result['Check_Out_Time'].where(full_result['Check_Out_Time'].notna(), pd.NaT)
 
-    # Fill missing Check-In/Check-Out with NaN or placeholders
+    # Fill same time for in/out if both exist but are the same
+    full_result.loc[
+        full_result['Check_In_Time'] == full_result['Check_Out_Time'],
+        'Check_Out_Time'
+    ] = pd.to_datetime("17:00").time()
+
+    # Set weekend names for missing values
+    full_result['Date'] = pd.to_datetime(full_result['Date'])
+    full_result['Weekday'] = full_result['Date'].dt.weekday
+
+    friday = full_result['Weekday'] == 4
+    saturday = full_result['Weekday'] == 5
+
+    full_result.loc[friday, ['Check_In_Time', 'Check_Out_Time']] = 'Friday'
+    full_result.loc[saturday, ['Check_In_Time', 'Check_Out_Time']] = 'Saturday'
+
+    # Fill missing with "Missing" or "Holiday"
     full_result['Check_In_Time'].fillna("Missing", inplace=True)
     full_result['Check_Out_Time'].fillna("Missing", inplace=True)
 
-    # Convert 'Date' to datetime if it's not already in datetime format
-    full_result['Date'] = pd.to_datetime(full_result['Date'], errors='coerce')
+    # Add Employee Name from file name
+    full_result['Employee Name'] = file.name.split('.')[0]
+    full_result['Date'] = full_result['Date'].dt.date
 
-    # Set 'Friday' and 'Saturday' for missing data based on the weekday
-    full_result.loc[full_result['Date'].dt.weekday == 4, 'Check_In_Time'] = 'Friday'
-    full_result.loc[full_result['Date'].dt.weekday == 5, 'Check_In_Time'] = 'Saturday'
-    full_result.loc[full_result['Date'].dt.weekday == 4, 'Check_Out_Time'] = 'Friday'
-    full_result.loc[full_result['Date'].dt.weekday == 5, 'Check_Out_Time'] = 'Saturday'
-
-    # Add the employee name from the file name
-    full_result['Employee Name'] = file.name.split('.')[0]  # Get the file name (without extension)
-    full_result['Date'] = pd.to_datetime(full_result['Date']).dt.date
+    # Drop helper column
+    full_result.drop(columns=['Weekday'], inplace=True)
 
     return full_result
 
