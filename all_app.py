@@ -131,7 +131,7 @@ def process_excel(file_path):
             data['Check_In_Time'].fillna("Holiday", inplace=True)
             data['Check_Out_Time'].fillna("Holiday", inplace=True)
             data = pd.DataFrame({
-                'Date': data['Date'],
+                'Date': data['Date'].dt.date,
                 'Check_In_Time': data['Check_In_Time'],
                 'Check_Out_Time': data['Check_Out_Time'],
                 'Worked_Hours': data['Worked_Hours'].round(2)
