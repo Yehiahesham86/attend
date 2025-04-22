@@ -130,7 +130,12 @@ def process_excel(file_path):
             # Fill missing values in Check_In_Time and Check_Out_Time
             data['Check_In_Time'].fillna("Holiday", inplace=True)
             data['Check_Out_Time'].fillna("Holiday", inplace=True)
-
+            data = pd.DataFrame({
+                'Date': data['Date'],
+                'Check_In_Time': data['Check_In_Time'],
+                'Check_Out_Time': data['Check_Out_Time'],
+                'Worked_Hours': worked_hours.round(2)
+            })
             # Calculate total worked hours for all data
             total_worked_hours = data['Worked_Hours'].sum()
             total_worked_hours_rounded = round(total_worked_hours, 0)
