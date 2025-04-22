@@ -21,7 +21,8 @@ def process_attendance_files(file):
     df['Date'] = df[datetime_col].dt.date
 
     # Filter the data to include only the 1st to the 26th of the month
-    df_filtered = df[df['Date'].apply(lambda x: 25 <= x.day <= 26)]
+    # Keep rows where the day of the month is between 1 and 26
+    df_filtered = df[df['Date'].dt.day <= 26]
 
     # Extract Check-In and Check-Out times
     df_filtered['Check_In_Time'] = df_filtered[datetime_col].dt.time  # Extract time for Check-In
