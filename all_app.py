@@ -87,7 +87,9 @@ def process_excel(file_path):
 
     with pd.ExcelWriter("processed_full_attendans.xlsx", engine='xlsxwriter') as output:
         for sheet_name, data in df.items():
-
+            # Convert to datetime, coercing errors (invalid values will be turned to NaT)
+            data['Check_In_Time'] = pd.to_datetime(data['Check_In_Time'], errors='coerce')
+            data['Check_Out_Time'] = pd.to_datetime(data['Check_Out_Time'], errors='coerce')
 
             data['Invalid_Row'] = data['Check_In_Time'].isna() | data['Check_Out_Time'].isna()
 
