@@ -83,50 +83,67 @@ def process_attendance_files(file):
 
 # Function to process Excel file and calculate worked hours (from second app)
 def process_excel(file_path):
+    # Read the Excel file with multiple sheets
     df = pd.read_excel(file_path, sheet_name=None)
 
+    # Create an Excel writer to save the processed data
     with pd.ExcelWriter("processed_full_attendans.xlsx", engine='xlsxwriter') as output:
         for sheet_name, data in df.items():
-            # Convert to datetime, coercing errors (invalid values will be turned to NaT)
-            data['Check_In_Time'] = pd.to_datetime(data['Check_In_Time'], errors='coerce').dt.time
-            data['Check_Out_Time'] = pd.to_datetime(data['Check_Out_Time'], errors='coerce').dt.time
+            # Convert Check_In_Time and Check_Out_Time to datetime, errors='coerce' to handle invalid values
+            data['Check_In_Time'] = pd.to_datetime(data['Check_In_Time'], errors='coerce')
+            data['Check_Out_Time'] = pd.to_datetime(data['Check_Out_Time'], errors='coerce')
 
+            # Extract only the time part from datetime
+            data['Check_In_Time'] = data['Check_In_Time'].dt.time
+            data['Check_Out_Time'] = data['Check_Out_Time'].dt.time
+
+            # Create an 'Invalid_Row' column to flag rows where Check_In or Check_Out is missing
             data['Invalid_Row'] = data['Check_In_Time'].isna() | data['Check_Out_Time'].isna()
 
+            # Calculate Worked_Hours, only for valid rows
             data['Worked_Hours'] = None
-            data.loc[~data['Invalid_Row'], 'Worked_Hours'] = (data.loc[~data['Invalid_Row'], 'Check_Out_Time'] - 
-                                                               data.loc[~data['Invalid_Row'], 'Check_In_Time']).dt.total_seconds() / 3600
+            data.loc[~data['Invalid_Row'], 'Worked_Hours'] = (
+                pd.to_datetime(data.loc[~data['Invalid_Row'], 'Check_Out_Time'].astype(str), errors='coerce') -
+                pd.to_datetime(data.loc[~data['Invalid_Row'], 'Check_In_Time'].astype(str), errors='coerce')
+            ).dt.total_seconds() / 3600  # Convert time difference to hours
 
+            # Group by Date and sum the Worked_Hours
             daily_hours = data.groupby('Date')['Worked_Hours'].sum().reset_index()
-
             daily_hours['Sheet_Name'] = sheet_name
 
+            # Merge daily hours back into the original data
             data = data.merge(daily_hours[['Date', 'Worked_Hours']], on='Date', how='left', suffixes=('', '_y'))
 
+            # Drop extra column if it exists
             if 'Worked_Hours_y' in data.columns:
                 data.drop(columns="Worked_Hours_y", inplace=True)
 
+            # Remove Invalid_Row column
             data.drop(columns=['Invalid_Row'], inplace=True)
 
+            # Handle weekends (Friday and Saturday)
             data.loc[data['Date'].dt.weekday == 4, 'Check_In_Time'] = 'Friday'
             data.loc[data['Date'].dt.weekday == 5, 'Check_In_Time'] = 'Saturday'
             data.loc[data['Date'].dt.weekday == 4, 'Check_Out_Time'] = 'Friday'
             data.loc[data['Date'].dt.weekday == 5, 'Check_Out_Time'] = 'Saturday'
 
+            # Fill missing values in Check_In_Time and Check_Out_Time
             data['Check_In_Time'].fillna("Holiday", inplace=True)
             data['Check_Out_Time'].fillna("Holiday", inplace=True)
 
+            # Calculate total worked hours for all data
             total_worked_hours = data['Worked_Hours'].sum()
             total_worked_hours_rounded = round(total_worked_hours, 0)
 
+            # Add a total row
             total_row = pd.DataFrame({'Date': ['Total'], 'Worked_Hours': [total_worked_hours_rounded]})
-
             data = pd.concat([data, total_row], ignore_index=True)
 
+            # Write each sheet's data to the output file
             data.to_excel(output, sheet_name=sheet_name, index=False)
 
+    # Return the path to the processed file
     return "processed_full_attendans.xlsx"
-
 
 # Streamlit app UI
 def main():
