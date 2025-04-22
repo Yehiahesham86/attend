@@ -134,7 +134,7 @@ def process_excel(file_path):
                 'Date': data['Date'],
                 'Check_In_Time': data['Check_In_Time'],
                 'Check_Out_Time': data['Check_Out_Time'],
-                'Worked_Hours': worked_hours.round(2)
+                'Worked_Hours': data['Worked_Hours'].round(2)
             })
             # Calculate total worked hours for all data
             total_worked_hours = data['Worked_Hours'].sum()
