@@ -73,19 +73,20 @@ def process_excel(file_path, holidays_file):
 
     with pd.ExcelWriter("processed_full_attendans.xlsx", engine='xlsxwriter') as output:
         for sheet_name, data in df.items():
+            
             data['Check_In_Time'] = pd.to_datetime(data['Check_In_Time'], errors='coerce')
             data['Check_Out_Time'] = pd.to_datetime(data['Check_Out_Time'], errors='coerce')
             data['Check_In_Time'] = data['Check_In_Time'].dt.time
             data['Check_Out_Time'] = data['Check_Out_Time'].dt.time
 
             data['Invalid_Row'] = data['Check_In_Time'].isna() | data['Check_Out_Time'].isna()
-
+            
             data['Worked_Hours'] = None
             data.loc[~data['Invalid_Row'], 'Worked_Hours'] = (
                 pd.to_datetime(data.loc[~data['Invalid_Row'], 'Check_Out_Time'].astype(str), errors='coerce') - 
                 pd.to_datetime(data.loc[~data['Invalid_Row'], 'Check_In_Time'].astype(str), errors='coerce')
             ).dt.total_seconds() / 3600
-
+            data['Worked_Hours'] = pd.Series(dtype='float')
             daily_hours = data.groupby('Date')['Worked_Hours'].sum().reset_index()
             daily_hours['Sheet_Name'] = sheet_name
 
