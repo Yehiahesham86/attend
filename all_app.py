@@ -80,7 +80,7 @@ def process_excel(file_path, holidays_file):
             data['Check_Out_Time'] = data['Check_Out_Time'].dt.time
 
             data['Invalid_Row'] = data['Check_In_Time'].isna() | data['Check_Out_Time'].isna()
-            data['Worked_Hours'] = pd.Series(dtype='float')
+            
             data['Worked_Hours'] = None
             data.loc[~data['Invalid_Row'], 'Worked_Hours'] = (
                 pd.to_datetime(data.loc[~data['Invalid_Row'], 'Check_Out_Time'].astype(str), errors='coerce') - 
