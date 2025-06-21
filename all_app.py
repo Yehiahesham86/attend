@@ -3,11 +3,10 @@ import pandas as pd
 from io import BytesIO
 from datetime import datetime, date
 
-def process_attendance_files(file):
+def process_attendance_files(file, start_date, end_date):
     df = pd.read_excel(file)
 
     # Check column names
-    st.write(f"Columns in {file.name}: {df.columns}")
 
     datetime_col = 'Date/Time'  # Replace with actual column name
     if datetime_col not in df.columns:
@@ -19,10 +18,7 @@ def process_attendance_files(file):
     df = df.dropna(subset=[datetime_col])
     df['Date'] = df[datetime_col].dt.date
 
-    # --- Filter from 25th of last month to 26th of current month ---
-    today = pd.to_datetime("today").date()
-    start_date = (today.replace(day=1) - pd.Timedelta(days=1)).replace(day=25)
-    end_date = today.replace(day=26)
+    # Filter data within selected date range
     df_filtered = df[(df['Date'] >= start_date) & (df['Date'] <= end_date)]
 
     if df_filtered.empty:
@@ -53,10 +49,10 @@ def process_attendance_files(file):
     full_result['Check_Out_Time'] = full_result['Check_Out_Time'].where(full_result['Check_Out_Time'].notna(), pd.NaT)
 
     # Fill same time for in/out if both exist but are the same
-    full_result.loc[
-        full_result['Check_In_Time'] == full_result['Check_Out_Time'],
-        'Check_Out_Time'
-    ] = pd.to_datetime("17:00").time()
+    #full_result.loc[
+       # full_result['Check_In_Time'] == full_result['Check_Out_Time'],
+       # 'Check_Out_Time'
+    #] = pd.to_datetime("17:00").time()
 
     # Set weekend names for missing values
     full_result['Date'] = pd.to_datetime(full_result['Date'])
@@ -103,7 +99,7 @@ def process_excel(file_path):
             # Calculate Worked_Hours, only for valid rows
             data['Worked_Hours'] = None
             data.loc[~data['Invalid_Row'], 'Worked_Hours'] = (
-                pd.to_datetime(data.loc[~data['Invalid_Row'], 'Check_Out_Time'].astype(str), errors='coerce') -
+                pd.to_datetime(data.loc[~data['Invalid_Row'], 'Check_Out_Time'].astype(str), errors='coerce') - 
                 pd.to_datetime(data.loc[~data['Invalid_Row'], 'Check_In_Time'].astype(str), errors='coerce')
             ).dt.total_seconds() / 3600  # Convert time difference to hours
 
@@ -159,28 +155,46 @@ def main():
 
     with tab1:
         st.header("Upload Attendance Data")
+
+        # Default date range: from 25th of last month to 26th of this month
+        today = date.today()
+        default_start = (today.replace(day=1) - pd.Timedelta(days=1)).replace(day=25)
+        default_end = today.replace(day=26)
+
+        # Date filters
+        start_date = st.date_input("Start Date", value=default_start)
+        end_date = st.date_input("End Date", value=default_end)
+
         uploaded_files = st.file_uploader("Upload Excel Files", type=["xls", "xlsx"], accept_multiple_files=True)
 
         if uploaded_files:
-            with BytesIO() as output:
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    for uploaded_file in uploaded_files:
-                        st.write(f"Processing file: {uploaded_file.name}")
-                        try:
-                            file_data = process_attendance_files(uploaded_file)
-                            if isinstance(file_data, pd.DataFrame) and not file_data.empty:
-                                file_data.to_excel(writer, sheet_name=uploaded_file.name.split('.')[0], index=False)
-                            else:
-                                st.warning(f"Skipping file {uploaded_file.name} due to missing data or invalid format.")
-                        except Exception as e:
-                            st.error(f"Error processing {uploaded_file.name}: {e}")
+            all_data = []
 
-                output.seek(0)
+            for uploaded_file in uploaded_files:
+                try:
+                    file_data = process_attendance_files(uploaded_file, start_date, end_date)
+                    all_data.append(file_data)
+                except Exception as e:
+                    st.error(f"Error processing file {uploaded_file.name}: {e}")
+
+            if all_data:
+                combined_df = pd.concat(all_data, ignore_index=True)
+                # Save each file to a different sheet
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    for i, file_data in enumerate(all_data):
+                        file_name = uploaded_files[i].name.split('.')[0]
+                        file_data.to_excel(writer, index=False, sheet_name=file_name)
+
+                output.seek(0)  # Rewind the buffer
+
+                st.success("Data processed successfully!")
+
                 st.download_button(
-                    label="Download Combined Data",
+                    label="📥 Download Excel File",
                     data=output,
-                    file_name="half_attendance_data.xlsx",
-                    mime="application/vnd.ms-excel"
+                    file_name="combined_attendance.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
 
     with tab2:
