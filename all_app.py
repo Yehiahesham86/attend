@@ -3,221 +3,178 @@ import pandas as pd
 from io import BytesIO
 from datetime import datetime, date
 
+# Process each attendance file between start_date and end_date
 def process_attendance_files(file, start_date, end_date):
     df = pd.read_excel(file)
-
-    # Check column names
-
-    datetime_col = 'Date/Time'  # Replace with actual column name
+    datetime_col = 'Date/Time'
+    
     if datetime_col not in df.columns:
         st.warning(f"'{datetime_col}' column not found in {file.name}")
         return pd.DataFrame()
 
-    # Convert to datetime and drop rows with invalid dates
     df[datetime_col] = pd.to_datetime(df[datetime_col], errors='coerce')
-    df = df.dropna(subset=[datetime_col])
+    df.dropna(subset=[datetime_col], inplace=True)
     df['Date'] = df[datetime_col].dt.date
 
-    # Filter data within selected date range
     df_filtered = df[(df['Date'] >= start_date) & (df['Date'] <= end_date)]
-
     if df_filtered.empty:
-        st.warning(f"No valid data between {start_date} and {end_date} in {file.name}")
+        st.warning(f"No data in {file.name} between {start_date} and {end_date}")
         return pd.DataFrame()
 
-    # Extract Check-In and Check-Out times
     df_filtered['Check_In_Time'] = df_filtered[datetime_col].dt.time
     df_filtered['Check_Out_Time'] = df_filtered[datetime_col].dt.time
 
-    # Group by date and calculate earliest/latest times
     result = df_filtered.groupby('Date').agg(
         Check_In_Time=('Check_In_Time', 'min'),
         Check_Out_Time=('Check_Out_Time', 'max')
     ).reset_index()
 
-    # Preserve employee metadata
     meta_cols = [col for col in ['Name', 'Department', 'No.', 'Date'] if col in df_filtered.columns]
-    df_filtered_grouped = df_filtered[meta_cols].drop_duplicates()
-    full_result = pd.merge(result, df_filtered_grouped, on='Date', how='left')
+    meta_data = df_filtered[meta_cols].drop_duplicates(subset='Date') if meta_cols else pd.DataFrame({'Date': result['Date']})
 
-    # --- Fill missing dates from 25th last month to 26th current month ---
+    full_result = pd.merge(result, meta_data, on='Date', how='left')
     full_range = pd.date_range(start=start_date, end=end_date).date
     full_result = pd.DataFrame({'Date': full_range}).merge(full_result, on='Date', how='left')
 
-    # Convert Check_In/Out to datetime.time or placeholders
+    # Handle missing values and Friday/Saturday logic
     full_result['Check_In_Time'] = full_result['Check_In_Time'].where(full_result['Check_In_Time'].notna(), pd.NaT)
     full_result['Check_Out_Time'] = full_result['Check_Out_Time'].where(full_result['Check_Out_Time'].notna(), pd.NaT)
 
-    # Fill same time for in/out if both exist but are the same
-    #full_result.loc[
-       # full_result['Check_In_Time'] == full_result['Check_Out_Time'],
-       # 'Check_Out_Time'
-    #] = pd.to_datetime("17:00").time()
+    full_result.loc[
+        full_result['Check_In_Time'] == full_result['Check_Out_Time'],
+        'Check_Out_Time'
+    ] = pd.to_datetime("17:00").time()
 
-    # Set weekend names for missing values
-    full_result['Date'] = pd.to_datetime(full_result['Date'])
-    full_result['Weekday'] = full_result['Date'].dt.weekday
+    full_result['Weekday'] = pd.to_datetime(full_result['Date']).dt.weekday
+    full_result.loc[full_result['Weekday'] == 4, ['Check_In_Time', 'Check_Out_Time']] = 'Friday'
+    full_result.loc[full_result['Weekday'] == 5, ['Check_In_Time', 'Check_Out_Time']] = 'Saturday'
 
-    friday = full_result['Weekday'] == 4
-    saturday = full_result['Weekday'] == 5
-
-    full_result.loc[friday, ['Check_In_Time', 'Check_Out_Time']] = 'Friday'
-    full_result.loc[saturday, ['Check_In_Time', 'Check_Out_Time']] = 'Saturday'
-
-    # Fill missing with "Missing" or "Holiday"
     full_result['Check_In_Time'].fillna("Missing", inplace=True)
     full_result['Check_Out_Time'].fillna("Missing", inplace=True)
 
-    # Add Employee Name from file name
     full_result['Employee Name'] = file.name.split('.')[0]
-    full_result['Date'] = full_result['Date'].dt.date
-
-    # Drop helper column
     full_result.drop(columns=['Weekday'], inplace=True)
 
     return full_result
 
-# Function to process Excel file and calculate worked hours (from second app)
+# Mark holidays
+def apply_holiday_names(df, holiday_file):
+    if holiday_file is None:
+        return df
+
+    try:
+        holidays = pd.read_excel(holiday_file)
+        holidays['Date'] = pd.to_datetime(holidays['Date']).dt.date
+    except Exception as e:
+        st.warning(f"Could not read holiday file: {e}")
+        return df
+
+    if 'Date' not in holidays or 'Holiday_Name' not in holidays:
+        st.warning("Holiday file must have 'Date' and 'Holiday_Name' columns.")
+        return df
+
+    holiday_dict = dict(zip(holidays['Date'], holidays['Holiday_Name']))
+
+    def replace(row):
+        holiday = holiday_dict.get(row['Date'])
+        if holiday:
+            if row['Check_In_Time'] == "Missing":
+                row['Check_In_Time'] = holiday
+            if row['Check_Out_Time'] == "Missing":
+                row['Check_Out_Time'] = holiday
+        return row
+
+    return df.apply(replace, axis=1)
+
+# Post-process attendance file to calculate hours
 def process_excel(file_path):
-    # Read the Excel file with multiple sheets
     df = pd.read_excel(file_path, sheet_name=None)
 
-    # Create an Excel writer to save the processed data
-    with pd.ExcelWriter("processed_full_attendans.xlsx", engine='xlsxwriter') as output:
+    with pd.ExcelWriter("processed_full_attendans.xlsx", engine='xlsxwriter') as writer:
         for sheet_name, data in df.items():
-            # Convert Check_In_Time and Check_Out_Time to datetime, errors='coerce' to handle invalid values
-            data['Check_In_Time'] = pd.to_datetime(data['Check_In_Time'], errors='coerce')
-            data['Check_Out_Time'] = pd.to_datetime(data['Check_Out_Time'], errors='coerce')
+            try:
+                data['Date'] = pd.to_datetime(data['Date'])
+                data['Check_In_Time'] = pd.to_datetime(data['Check_In_Time'], errors='coerce').dt.time
+                data['Check_Out_Time'] = pd.to_datetime(data['Check_Out_Time'], errors='coerce').dt.time
+                data['Worked_Hours'] = None
 
-            # Extract only the time part from datetime
-            data['Check_In_Time'] = data['Check_In_Time'].dt.time
-            data['Check_Out_Time'] = data['Check_Out_Time'].dt.time
+                valid_rows = data['Check_In_Time'].notna() & data['Check_Out_Time'].notna()
+                check_in = pd.to_datetime(data.loc[valid_rows, 'Check_In_Time'].astype(str), errors='coerce')
+                check_out = pd.to_datetime(data.loc[valid_rows, 'Check_Out_Time'].astype(str), errors='coerce')
+                data.loc[valid_rows, 'Worked_Hours'] = (check_out - check_in).dt.total_seconds() / 3600
 
-            # Create an 'Invalid_Row' column to flag rows where Check_In or Check_Out is missing
-            data['Invalid_Row'] = data['Check_In_Time'].isna() | data['Check_Out_Time'].isna()
+                total_hours = round(data['Worked_Hours'].sum(skipna=True), 2)
+                total_row = pd.DataFrame({'Date': ['Total'], 'Worked_Hours': [total_hours]})
+                data['Date'] = data['Date'].dt.date
 
-            # Calculate Worked_Hours, only for valid rows
-            data['Worked_Hours'] = None
-            data.loc[~data['Invalid_Row'], 'Worked_Hours'] = (
-                pd.to_datetime(data.loc[~data['Invalid_Row'], 'Check_Out_Time'].astype(str), errors='coerce') - 
-                pd.to_datetime(data.loc[~data['Invalid_Row'], 'Check_In_Time'].astype(str), errors='coerce')
-            ).dt.total_seconds() / 3600  # Convert time difference to hours
+                result = data[['Date', 'Check_In_Time', 'Check_Out_Time', 'Worked_Hours']]
+                result = pd.concat([result, total_row], ignore_index=True)
+                result.to_excel(writer, sheet_name=sheet_name[:31], index=False)
 
-            # Group by Date and sum the Worked_Hours
-            daily_hours = data.groupby('Date')['Worked_Hours'].sum().reset_index()
-            daily_hours['Sheet_Name'] = sheet_name
+            except Exception as e:
+                st.error(f"Error processing sheet {sheet_name}: {e}")
 
-            # Merge daily hours back into the original data
-            data = data.merge(daily_hours[['Date', 'Worked_Hours']], on='Date', how='left', suffixes=('', '_y'))
-
-            # Drop extra column if it exists
-            if 'Worked_Hours_y' in data.columns:
-                data.drop(columns="Worked_Hours_y", inplace=True)
-
-            # Remove Invalid_Row column
-            data.drop(columns=['Invalid_Row'], inplace=True)
-
-            # Handle weekends (Friday and Saturday)
-            data.loc[data['Date'].dt.weekday == 4, 'Check_In_Time'] = 'Friday'
-            data.loc[data['Date'].dt.weekday == 5, 'Check_In_Time'] = 'Saturday'
-            data.loc[data['Date'].dt.weekday == 4, 'Check_Out_Time'] = 'Friday'
-            data.loc[data['Date'].dt.weekday == 5, 'Check_Out_Time'] = 'Saturday'
-
-            # Fill missing values in Check_In_Time and Check_Out_Time
-            data['Check_In_Time'].fillna("Holiday", inplace=True)
-            data['Check_Out_Time'].fillna("Holiday", inplace=True)
-            data = pd.DataFrame({
-                'Date': data['Date'].dt.date,
-                'Check_In_Time': data['Check_In_Time'],
-                'Check_Out_Time': data['Check_Out_Time'],
-                'Worked_Hours': data['Worked_Hours'].round(2)
-            })
-            # Calculate total worked hours for all data
-            total_worked_hours = data['Worked_Hours'].sum()
-            total_worked_hours_rounded = round(total_worked_hours, 0)
-
-            # Add a total row
-            total_row = pd.DataFrame({'Date': ['Total'], 'Worked_Hours': [total_worked_hours_rounded]})
-            data = pd.concat([data, total_row], ignore_index=True)
-
-            # Write each sheet's data to the output file
-            data.to_excel(output, sheet_name=sheet_name, index=False)
-
-    # Return the path to the processed file
     return "processed_full_attendans.xlsx"
 
-# Streamlit app UI
+# Streamlit UI
 def main():
-    st.title("Attendance Data Processor")
+    st.set_page_config(page_title="Attendance Processor", layout="wide")
+    st.title("🕒 Attendance Data Processor")
 
-    # Tabs using streamlit
-    tab1, tab2 = st.tabs(["Process Attendance Data", "Calculate Worked Hours"])
+    tab1, tab2 = st.tabs(["📁 Process Attendance", "📊 Calculate Worked Hours"])
 
     with tab1:
-        st.header("Upload Attendance Data")
-
-        # Default date range: from 25th of last month to 26th of this month
+        st.header("Step 1: Upload Attendance Files")
         today = date.today()
         default_start = (today.replace(day=1) - pd.Timedelta(days=1)).replace(day=25)
         default_end = today.replace(day=26)
 
-        # Date filters
-        start_date = st.date_input("Start Date", value=default_start)
-        end_date = st.date_input("End Date", value=default_end)
-
-        uploaded_files = st.file_uploader("Upload Excel Files", type=["xls", "xlsx"], accept_multiple_files=True)
+        start_date = st.date_input("Start Date", default_start)
+        end_date = st.date_input("End Date", default_end)
+        holiday_file = st.file_uploader("Optional: Upload Holidays File (Date, Holiday_Name)", type=["xls", "xlsx"])
+        uploaded_files = st.file_uploader("Upload Attendance Excel Files", type=["xls", "xlsx"], accept_multiple_files=True)
 
         if uploaded_files:
             all_data = []
-
-            for uploaded_file in uploaded_files:
+            for file in uploaded_files:
                 try:
-                    file_data = process_attendance_files(uploaded_file, start_date, end_date)
-                    all_data.append(file_data)
+                    processed = process_attendance_files(file, start_date, end_date)
+                    processed = apply_holiday_names(processed, holiday_file)
+                    all_data.append(processed)
                 except Exception as e:
-                    st.error(f"Error processing file {uploaded_file.name}: {e}")
+                    st.error(f"Error processing {file.name}: {e}")
 
             if all_data:
-                combined_df = pd.concat(all_data, ignore_index=True)
-                # Save each file to a different sheet
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    for i, file_data in enumerate(all_data):
-                        file_name = uploaded_files[i].name.split('.')[0]
-                        file_data.to_excel(writer, index=False, sheet_name=file_name)
+                    for i, data in enumerate(all_data):
+                        sheet_name = uploaded_files[i].name.split('.')[0][:31]
+                        data.to_excel(writer, index=False, sheet_name=sheet_name)
 
-                output.seek(0)  # Rewind the buffer
-
-                st.success("Data processed successfully!")
-
+                output.seek(0)
+                st.success("✅ Attendance processed!")
                 st.download_button(
-                    label="📥 Download Excel File",
+                    "📥 Download Combined File",
                     data=output,
                     file_name="combined_attendance.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
 
     with tab2:
-        st.header("Upload Excel File to Calculate Worked Hours")
-        uploaded_file = st.file_uploader("Choose an Excel file", type=["xlsx"])
+        st.header("Step 2: Upload File to Calculate Worked Hours")
+        file_to_process = st.file_uploader("Upload Combined Attendance Excel File", type=["xlsx"])
 
-        if uploaded_file is not None:
-            st.write("Processing your file...")
+        if file_to_process:
             with open("uploaded_file.xlsx", "wb") as f:
-                f.write(uploaded_file.getbuffer())
-
-            processed_file = process_excel("uploaded_file.xlsx")
-
-            st.write("File processed successfully! You can download the updated file below:")
-
-            with open(processed_file, "rb") as f:
+                f.write(file_to_process.read())
+            result_path = process_excel("uploaded_file.xlsx")
+            with open(result_path, "rb") as f:
                 st.download_button(
-                    label="Download Processed Excel",
+                    "📥 Download Worked Hours Report",
                     data=f,
-                    file_name="full_attendans.xlsx",
+                    file_name=result_path,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-
 
 if __name__ == "__main__":
     main()
