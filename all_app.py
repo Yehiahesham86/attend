@@ -45,8 +45,8 @@ def process_attendance_files(file, start_date, end_date, holidays_file):
     full_result.loc[full_result['Weekday'] == 4, ['Check_In_Time', 'Check_Out_Time']] = 'Friday'
     full_result.loc[full_result['Weekday'] == 5, ['Check_In_Time', 'Check_Out_Time']] = 'Saturday'
 
-    full_result['Check_In_Time'].fillna("Missing", inplace=True)
-    full_result['Check_Out_Time'].fillna("Missing", inplace=True)
+    full_result['Check_In_Time'].fillna("No Check In", inplace=True)
+    full_result['Check_Out_Time'].fillna("No Check Out", inplace=True)
     full_result['Employee Name'] = file.name.split('.')[0]
     full_result['Date'] = full_result['Date'].dt.date
     full_result.drop(columns=['Weekday'], inplace=True)
