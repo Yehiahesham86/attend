@@ -38,7 +38,7 @@ def process_attendance_files(file, start_date, end_date, holidays_file):
 
     full_result['Check_In_Time'] = full_result['Check_In_Time'].where(full_result['Check_In_Time'].notna(), pd.NaT)
     full_result['Check_Out_Time'] = full_result['Check_Out_Time'].where(full_result['Check_Out_Time'].notna(), pd.NaT)
-    full_result.loc[full_result['Check_In_Time'] == full_result['Check_Out_Time'], 'Check_Out_Time'] = pd.to_datetime("17:00").time()
+    full_result.loc[full_result['Check_In_Time'] == full_result['Check_Out_Time'], 'Check_Out_Time'] = "No Check Out"
 
     full_result['Date'] = pd.to_datetime(full_result['Date'])
     full_result['Weekday'] = full_result['Date'].dt.weekday
@@ -100,8 +100,8 @@ def process_excel(file_path, holidays_file):
             data.loc[data['Date'].dt.weekday == 4, 'Check_Out_Time'] = 'Friday'
             data.loc[data['Date'].dt.weekday == 5, 'Check_Out_Time'] = 'Saturday'
 
-            data['Check_In_Time'].fillna("Holiday", inplace=True)
-            data['Check_Out_Time'].fillna("Holiday", inplace=True)
+            data['Check_In_Time'].fillna("No Check In", inplace=True)
+            data['Check_Out_Time'].fillna("No Check Out", inplace=True)
 
             data = pd.DataFrame({
                 'Date': data['Date'].dt.date,
