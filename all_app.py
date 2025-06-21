@@ -80,13 +80,13 @@ def process_excel(file_path, holidays_file):
             data['Check_Out_Time'] = data['Check_Out_Time'].dt.time
 
             data['Invalid_Row'] = data['Check_In_Time'].isna() | data['Check_Out_Time'].isna()
-            
+            data['Worked_Hours'] = pd.Series(dtype='float')
             data['Worked_Hours'] = None
             data.loc[~data['Invalid_Row'], 'Worked_Hours'] = (
                 pd.to_datetime(data.loc[~data['Invalid_Row'], 'Check_Out_Time'].astype(str), errors='coerce') - 
                 pd.to_datetime(data.loc[~data['Invalid_Row'], 'Check_In_Time'].astype(str), errors='coerce')
             ).dt.total_seconds() / 3600
-            data['Worked_Hours'] = pd.Series(dtype='float')
+            
             daily_hours = data.groupby('Date')['Worked_Hours'].sum().reset_index()
             daily_hours['Sheet_Name'] = sheet_name
 
