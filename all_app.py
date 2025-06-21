@@ -110,6 +110,7 @@ def process_excel(file_path, holidays_file):
                 'Worked_Hours': data['Worked_Hours'].round(2)
             })
 
+            data['Worked_Hours'] = pd.to_numeric(data['Worked_Hours'], errors='coerce')  # ensure numeric
             total_worked_hours = data['Worked_Hours'].sum()
             total_worked_hours_rounded = round(total_worked_hours, 0)
             summary.append({'Employee': clean_sheet_name(sheet_name), 'Total Worked Hours': total_worked_hours_rounded})
