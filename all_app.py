@@ -2,9 +2,8 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 from datetime import datetime, date
-import re
 
-def process_attendance_files(file, start_date, end_date,holidays_file):
+def process_attendance_files(file, start_date, end_date):
     df = pd.read_excel(file)
 
     # Check column names
@@ -50,10 +49,10 @@ def process_attendance_files(file, start_date, end_date,holidays_file):
     full_result['Check_Out_Time'] = full_result['Check_Out_Time'].where(full_result['Check_Out_Time'].notna(), pd.NaT)
 
     # Fill same time for in/out if both exist but are the same
-    full_result.loc[
-        full_result['Check_In_Time'] == full_result['Check_Out_Time'],
-        'Check_Out_Time'
-    ] = pd.to_datetime("17:00").time()
+    #full_result.loc[
+       # full_result['Check_In_Time'] == full_result['Check_Out_Time'],
+       # 'Check_Out_Time'
+    #] = pd.to_datetime("17:00").time()
 
     # Set weekend names for missing values
     full_result['Date'] = pd.to_datetime(full_result['Date'])
@@ -75,42 +74,17 @@ def process_attendance_files(file, start_date, end_date,holidays_file):
 
     # Drop helper column
     full_result.drop(columns=['Weekday'], inplace=True)
-    
-    # Process holidays
-    holidays_df = pd.read_excel(holidays_file)
-    holidays_df['Date'] = pd.to_datetime(holidays_df['Date']).dt.date
-
-    # Merge the DataFrames on 'Date' to add the Holiday_Name
-    full_result = pd.merge(full_result, holidays_df, on='Date', how='left')
-
-    
-    # Replace Check_In_Time and Check_Out_Time with the actual Holiday_Name
-    holiday_mask = full_result['Holiday_Name'].notna() & (full_result['Holiday_Name'] != '')
-    full_result.loc[holiday_mask, 'Check_In_Time'] = full_result.loc[holiday_mask, 'Holiday_Name']
-    full_result.loc[holiday_mask, 'Check_Out_Time'] = full_result.loc[holiday_mask, 'Holiday_Name']
-
-    # Remove the Holiday_Name column
-    full_result.drop(columns=['Holiday_Name','Day','Name','Department','No.','Employee Name'], inplace=True)
 
     return full_result
 
 # Function to process Excel file and calculate worked hours (from second app)
-def process_excel(file_path, holidays_file):
+def process_excel(file_path):
     # Read the Excel file with multiple sheets
     df = pd.read_excel(file_path, sheet_name=None)
-    # Clean the sheet name to only have letters
-    
-    summary = []
-
-    # Function to clean sheet names (only letters)
-    def clean_sheet_name(sheet_name):
-        return re.sub(r'[^a-zA-Z]', '', sheet_name)
 
     # Create an Excel writer to save the processed data
     with pd.ExcelWriter("processed_full_attendans.xlsx", engine='xlsxwriter') as output:
-        
         for sheet_name, data in df.items():
-            cleaned_sheet_name = clean_sheet_name(sheet_name)
             # Convert Check_In_Time and Check_Out_Time to datetime, errors='coerce' to handle invalid values
             data['Check_In_Time'] = pd.to_datetime(data['Check_In_Time'], errors='coerce')
             data['Check_Out_Time'] = pd.to_datetime(data['Check_Out_Time'], errors='coerce')
@@ -166,84 +140,46 @@ def process_excel(file_path, holidays_file):
             total_row = pd.DataFrame({'Date': ['Total'], 'Worked_Hours': [total_worked_hours_rounded]})
             data = pd.concat([data, total_row], ignore_index=True)
 
-            # Process holidays
-            holidays_df = pd.read_excel(holidays_file)
-            holidays_df['Date'] = pd.to_datetime(holidays_df['Date']).dt.date
-
-            # Merge the DataFrames on 'Date' to add the Holiday_Name
-            data = pd.merge(data, holidays_df, on='Date', how='left')
-
-            # Replace Check_In_Time and Check_Out_Time with the actual Holiday_Name
-            holiday_mask = data['Holiday_Name'].notna() & (data['Holiday_Name'] != '')
-            data.loc[holiday_mask, 'Check_In_Time'] = data.loc[holiday_mask, 'Holiday_Name']
-            data.loc[holiday_mask, 'Check_Out_Time'] = data.loc[holiday_mask, 'Holiday_Name']
-
-            # Remove the Holiday_Name column
-            data.drop(columns=['Holiday_Name','Day'], inplace=True)
-            
-            
-            summary.append({'Employee': cleaned_sheet_name, 'Total Worked Hours': total_worked_hours_rounded})
-
-            total_row = pd.DataFrame({'Date': ['Total'], 'Worked_Hours': [total_worked_hours_rounded]})
-            data = pd.concat([data, total_row], ignore_index=True)
-
-            # Clean the sheet name to only have letters
-
             # Write each sheet's data to the output file
-            data.to_excel(output, sheet_name=cleaned_sheet_name[:31], index=False)
-
-        summary_df = pd.DataFrame(summary)
-        summary_df.to_excel(output, sheet_name='Summary', index=False)
+            data.to_excel(output, sheet_name=sheet_name, index=False)
 
     # Return the path to the processed file
     return "processed_full_attendans.xlsx"
 
 # Streamlit app UI
 def main():
-    st.set_page_config(page_title="Attendance Data Processor", page_icon="📊", layout="wide")
-    
-    # Adding a title and description with custom styling
-    st.markdown("""
-        <h1 style='text-align:center;'>Attendance Data Processor <span style="font-size: 50px;">📊</span></h1>
-        <p style='text-align:center;'>Process and calculate attendance data effortlessly</p>
-    """, unsafe_allow_html=True)
-    
+    st.title("Attendance Data Processor")
+
     # Tabs using streamlit
-    tab1, tab2 = st.tabs(["📅 Process Attendance Data", "🕒 Calculate Worked Hours"])
+    tab1, tab2 = st.tabs(["Process Attendance Data", "Calculate Worked Hours"])
 
     with tab1:
         st.header("Upload Attendance Data")
-        
+
         # Default date range: from 25th of last month to 26th of this month
         today = date.today()
         default_start = (today.replace(day=1) - pd.Timedelta(days=1)).replace(day=25)
         default_end = today.replace(day=26)
 
-        # Create two columns for date input side by side
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            start_date = st.date_input("Start Date", value=default_start)
-        
-        with col2:
-            end_date = st.date_input("End Date", value=default_end)
+        # Date filters
+        start_date = st.date_input("Start Date", value=default_start)
+        end_date = st.date_input("End Date", value=default_end)
 
-        # File uploaders with better descriptions
-        holidays_file = st.file_uploader("Holiday File (Excel)", type=["xls", "xlsx"], accept_multiple_files=False)
-        uploaded_files = st.file_uploader("Upload Attendance Excel Files", type=["xls", "xlsx"], accept_multiple_files=True)
+        uploaded_files = st.file_uploader("Upload Excel Files", type=["xls", "xlsx"], accept_multiple_files=True)
 
         if uploaded_files:
             all_data = []
 
             for uploaded_file in uploaded_files:
                 try:
-                    file_data = process_attendance_files(uploaded_file, start_date, end_date, holidays_file)
+                    file_data = process_attendance_files(uploaded_file, start_date, end_date)
                     all_data.append(file_data)
                 except Exception as e:
                     st.error(f"Error processing file {uploaded_file.name}: {e}")
 
             if all_data:
                 combined_df = pd.concat(all_data, ignore_index=True)
+                # Save each file to a different sheet
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     for i, file_data in enumerate(all_data):
@@ -252,37 +188,36 @@ def main():
 
                 output.seek(0)  # Rewind the buffer
 
-                st.success("Data processed successfully! 🎉")
+                st.success("Data processed successfully!")
 
                 st.download_button(
-                    label="📥 Download Processed Excel File",
+                    label="📥 Download Excel File",
                     data=output,
-                    file_name=f"Half Attendance - {datetime.today().strftime('%Y-%m-%d')}.xlsx",
+                    file_name="combined_attendance.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
 
     with tab2:
         st.header("Upload Excel File to Calculate Worked Hours")
-
-        holidays_file = st.file_uploader("Holidays File (Excel)", type=["xls", "xlsx"], accept_multiple_files=False)
-        uploaded_file = st.file_uploader("Upload Attendance Excel (Half)", type=["xlsx"])
+        uploaded_file = st.file_uploader("Choose an Excel file", type=["xlsx"])
 
         if uploaded_file is not None:
-            st.write("Processing your file... 🔄")
+            st.write("Processing your file...")
             with open("uploaded_file.xlsx", "wb") as f:
                 f.write(uploaded_file.getbuffer())
 
-            processed_file = process_excel("uploaded_file.xlsx", holidays_file)
+            processed_file = process_excel("uploaded_file.xlsx")
 
-            st.write("File processed successfully! 🎉 You can download the updated file below:")
+            st.write("File processed successfully! You can download the updated file below:")
 
             with open(processed_file, "rb") as f:
                 st.download_button(
-                    label="📥 Download Processed Worked Hours File",
+                    label="Download Processed Excel",
                     data=f,
-                    file_name=f"Full Attendance - {datetime.today().strftime('%Y-%m-%d')}.xlsx",
+                    file_name="full_attendans.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
+
 
 if __name__ == "__main__":
     main()
