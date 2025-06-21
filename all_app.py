@@ -108,7 +108,7 @@ def process_excel(file_path, holidays_file):
                 'Date': data['Date'].dt.date,
                 'Check_In_Time': data['Check_In_Time'],
                 'Check_Out_Time': data['Check_Out_Time'],
-                'Worked_Hours': data['Worked_Hours'].round(2)
+                'Worked_Hours': data['Worked_Hours']
             })
 
             data['Worked_Hours'] = pd.to_numeric(data['Worked_Hours'], errors='coerce')  # ensure numeric
